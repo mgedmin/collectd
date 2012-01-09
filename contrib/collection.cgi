@@ -839,7 +839,7 @@ HTML
   } # if (keys %selected_hosts)
 
   print qq(\t<select name="timespan">\n);
-  for (qw(Hour Day Week Month Year))
+  for (qw(Hour Day Week Month Year Trend))
   {
     my $timespan_uc = $_;
     my $timespan_lc = lc ($_);
