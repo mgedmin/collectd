@@ -22,7 +22,8 @@ our $ValidTimespan =
   day => 86400,
   week => 7 * 86400,
   month => 31 * 86400,
-  year => 366 * 86400
+  year => 366 * 86400,
+  trend => 183 * 86400
 };
 
 our @RRDDefaultArgs = ('-w', '400');
@@ -130,7 +131,7 @@ sub validate_args
 	}
 
 	if (defined ($Args->{'timespan'})
-	  && ($Args->{'timespan'} =~ m/^(hour|day|week|month|year)$/))
+	  && ($Args->{'timespan'} =~ m/^(hour|day|week|month|year|trend)$/))
 	{
 	  $Args->{'timespan'} = $1;
 	}
@@ -739,7 +740,7 @@ sub action_show_type
   $url_prefix .= ";type=$type_url";
   $url_prefix .= ";type_instance=$type_instance_url" if (defined ($type_instance));
 
-  for (qw(hour day week month year))
+  for (qw(hour day week month year trend))
   {
     my $timespan = $_;
 
@@ -757,20 +758,27 @@ sub action_show_graph
   my @rrd_args;
   my $title;
   
-  my %times = (hour => -3600, day => -86400, week => 7 * -86400, month => 31 * -86400, year => 366 * -86400);
+  my %times = (hour => -3600, day => -86400, week => 7 * -86400, month => 31 * -86400, year => 366 * -86400, trend => 183 * -86400);
   my $start_time = $times{$Args->{'timespan'}} || -86400;
+  my @end_time = ();
+  my $gtype = $type;
+  if ($Args->{'timespan'} eq 'trend') {
+    @end_time = ('-e', '+' . (-$start_time));
+    $gtype = $type . "_trend";
+    $gtype = $type unless exists ($MetaGraphDefs->{$gtype}) || defined ($GraphDefs->{$gtype});
+  }
 
   #print STDERR Data::Dumper->Dump ([$Args], ['Args']);
 
   # FIXME
-  if (exists ($MetaGraphDefs->{$type}))
+  if (exists ($MetaGraphDefs->{$gtype}))
   {
     my %types = _find_types ($host, $plugin, $plugin_instance);
-    return $MetaGraphDefs->{$type}->($host, $plugin, $plugin_instance, $type, $types{$type});
+    return $MetaGraphDefs->{$gtype}->($host, $plugin, $plugin_instance, $type, $types{$type});
   }
 
-  return if (!defined ($GraphDefs->{$type}));
-  @rrd_args = @{$GraphDefs->{$type}};
+  return if (!defined ($GraphDefs->{$gtype}));
+  @rrd_args = @{$GraphDefs->{$gtype}};
 
   $title = "$host/$plugin" . (defined ($plugin_instance) ? "-$plugin_instance" : '')
   . "/$type" . (defined ($type_instance) ? "-$type_instance" : '');
@@ -783,7 +791,7 @@ sub action_show_graph
     $file =~ s/:/\\:/g;
     s/{file}/$file/ for (@rrd_args);
 
-    RRDs::graph ('-', '-a', 'PNG', '-s', $start_time, '-t', $title, @RRDDefaultArgs, @rrd_args);
+    RRDs::graph ('-', '-a', 'PNG', '-s', $start_time, @end_time, '-t', $title, @RRDDefaultArgs, @rrd_args);
     if (my $err = RRDs::error ())
     {
       die ("RRDs::graph: $err");
@@ -1106,6 +1114,45 @@ sub load_graph_definitions
     'GPRINT:used_avg:AVERAGE:%5.1lf%sB Avg,',
     'GPRINT:used_max:MAX:%5.1lf%sB Max,',
     'GPRINT:used_avg:LAST:%5.1lf%sB Last\l'
+    ],
+    df_trend => ['-v', 'Percent', '-l', '0', '-u', '100',
+    'DEF:free_avg={file}:free:AVERAGE',
+    'DEF:free_min={file}:free:MIN',
+    'DEF:free_max={file}:free:MAX',
+    'DEF:used_avg={file}:used:AVERAGE',
+    'DEF:used_min={file}:used:MIN',
+    'DEF:used_max={file}:used:MAX',
+    'DEF:used_avg_for_trend={file}:used:AVERAGE:start=-1w',
+    'CDEF:total=free_avg,used_avg,+',
+    'CDEF:free_pct=100,free_avg,*,total,/',
+    'CDEF:used_pct=100,used_avg,*,total,/',
+    'CDEF:free_acc=free_pct,used_pct,+',
+    'CDEF:used_acc=used_pct',
+    'CDEF:used_for_trend=100,used_avg_for_trend,*,total,/',
+    'VDEF:used_slope=used_for_trend,LSLSLOPE',
+    'VDEF:used_intercept=used_for_trend,LSLINT',
+    'CDEF:used_trend_raw=used_for_trend,POP,used_slope,COUNT,*,used_intercept,+',
+    'CDEF:used_trend=used_trend_raw,0,100,LIMIT',
+    'CDEF:used_warning=used_trend,90,100,LIMIT',
+    'VDEF:used_warning_90=used_warning,FIRST',
+    'VDEF:used_warning_100=used_warning,LAST',
+    "AREA:free_acc#$HalfGreen",
+    "AREA:used_acc#$HalfRed",
+    "LINE1:free_acc#$FullGreen:Free",
+    'GPRINT:free_min:MIN:%5.1lf%sB Min,',
+    'GPRINT:free_avg:AVERAGE:%5.1lf%sB Avg,',
+    'GPRINT:free_max:MAX:%5.1lf%sB Max,',
+    'GPRINT:free_avg:LAST:%5.1lf%sB Last\l',
+    "LINE1:used_acc#$FullRed:Used",
+    'GPRINT:used_min:MIN:%5.1lf%sB Min,',
+    'GPRINT:used_avg:AVERAGE:%5.1lf%sB Avg,',
+    'GPRINT:used_max:MAX:%5.1lf%sB Max,',
+    'GPRINT:used_avg:LAST:%5.1lf%sB Last\l',
+    "AREA:used_warning#$HalfMagenta",
+    "HRULE:100#${FullGreen}::dashes=3",
+    "LINE1:used_trend#$FullMagenta:Trend since last week\\:\\n:dashes=3",
+    "GPRINT:used_warning_90:    reaches  90% on %Y-%m-%d:strftime",
+    "GPRINT:used_warning_100:    reaches 100% on %Y-%m-%d:strftime",
     ],
     disk => [
     'DEF:rtime_avg={file}:rtime:AVERAGE',
@@ -2281,6 +2328,38 @@ sub load_graph_definitions
     'GPRINT:procs_max:MAX:%5.1lf Max,',
     'GPRINT:procs_avg:LAST:%5.1lf Last\l'
     ],
+    ps_count_trend => ['-v', 'Processes',
+    'DEF:procs_avg={file}:processes:AVERAGE',
+    'DEF:procs_min={file}:processes:MIN',
+    'DEF:procs_max={file}:processes:MAX',
+    'DEF:procs_avg_for_trend={file}:processes:AVERAGE:start=-1w',
+    'DEF:thrds_avg={file}:threads:AVERAGE',
+    'DEF:thrds_min={file}:threads:MIN',
+    'DEF:thrds_max={file}:threads:MAX',
+    'DEF:thrds_avg_for_trend={file}:threads:AVERAGE:start=-1w',
+    'VDEF:procs_slope=procs_avg_for_trend,LSLSLOPE',
+    'VDEF:procs_intercept=procs_avg_for_trend,LSLINT',
+    'CDEF:procs_trend_raw=procs_avg_for_trend,POP,procs_slope,COUNT,*,procs_intercept,+',
+    'CDEF:procs_trend=procs_trend_raw,0,MAX',
+    'VDEF:thrds_slope=thrds_avg_for_trend,LSLSLOPE',
+    'VDEF:thrds_intercept=thrds_avg_for_trend,LSLINT',
+    'CDEF:thrds_trend_raw=thrds_avg_for_trend,POP,thrds_slope,COUNT,*,thrds_intercept,+',
+    'CDEF:thrds_trend=thrds_trend_raw,0,MAX',
+    "AREA:thrds_avg#$HalfBlue",
+    "AREA:procs_avg#$HalfRed",
+    "LINE1:thrds_avg#$FullBlue:Threads  ",
+    'GPRINT:thrds_min:MIN:%5.1lf Min,',
+    'GPRINT:thrds_avg:AVERAGE:%5.1lf Avg,',
+    'GPRINT:thrds_max:MAX:%5.1lf Max,',
+    'GPRINT:thrds_avg:LAST:%5.1lf Last\l',
+    "LINE1:thrds_trend#${FullMagenta}::dashes=3",
+    "LINE1:procs_avg#$FullRed:Processes",
+    'GPRINT:procs_min:MIN:%5.1lf Min,',
+    'GPRINT:procs_avg:AVERAGE:%5.1lf Avg,',
+    'GPRINT:procs_max:MAX:%5.1lf Max,',
+    'GPRINT:procs_avg:LAST:%5.1lf Last\l',
+    "LINE1:procs_trend#$FullMagenta:Trend since last week\\n:dashes=3",
+    ],
     ps_cputime => ['-v', 'Jiffies',
     'DEF:user_avg_raw={file}:user:AVERAGE',
     'DEF:user_min_raw={file}:user:MIN',
@@ -2340,6 +2419,23 @@ sub load_graph_definitions
     'GPRINT:max:MAX:%5.1lf%s Max,',
     'GPRINT:avg:LAST:%5.1lf%s Last\l'
     ],
+    ps_rss_trend => ['-v', 'Bytes',
+    'DEF:avg={file}:value:AVERAGE',
+    'DEF:min={file}:value:MIN',
+    'DEF:max={file}:value:MAX',
+    'DEF:avg_for_trend={file}:value:AVERAGE:start=-1w',
+    'VDEF:slope=avg_for_trend,LSLSLOPE',
+    'VDEF:intercept=avg_for_trend,LSLINT',
+    'CDEF:trend_raw=avg_for_trend,POP,slope,COUNT,*,intercept,+',
+    'CDEF:trend=trend_raw,0,MAX',
+    "AREA:avg#$HalfBlue",
+    "LINE1:avg#$FullBlue:RSS",
+    'GPRINT:min:MIN:%5.1lf%s Min,',
+    'GPRINT:avg:AVERAGE:%5.1lf%s Avg,',
+    'GPRINT:max:MAX:%5.1lf%s Max,',
+    'GPRINT:avg:LAST:%5.1lf%s Last\l',
+    "LINE1:trend#$FullMagenta:Trend since last week\\n:dashes=3",
+    ],
     ps_stacksize => ['-v', 'Bytes',
     'DEF:avg={file}:value:AVERAGE',
     'DEF:min={file}:value:MIN',
@@ -2361,6 +2457,23 @@ sub load_graph_definitions
     'GPRINT:avg:AVERAGE:%5.1lf%s Avg,',
     'GPRINT:max:MAX:%5.1lf%s Max,',
     'GPRINT:avg:LAST:%5.1lf%s Last\l'
+    ],
+    ps_vm_trend => ['-v', 'Bytes',
+    'DEF:avg={file}:value:AVERAGE',
+    'DEF:min={file}:value:MIN',
+    'DEF:max={file}:value:MAX',
+    'DEF:avg_for_trend={file}:value:AVERAGE:start=-1w',
+    'VDEF:slope=avg_for_trend,LSLSLOPE',
+    'VDEF:intercept=avg_for_trend,LSLINT',
+    'CDEF:trend_raw=avg_for_trend,POP,slope,COUNT,*,intercept,+',
+    'CDEF:trend=trend_raw,0,MAX',
+    "AREA:avg#$HalfGreen",
+    "LINE1:avg#$FullGreen:VIRT",
+    'GPRINT:min:MIN:%5.1lf%s Min,',
+    'GPRINT:avg:AVERAGE:%5.1lf%s Avg,',
+    'GPRINT:max:MAX:%5.1lf%s Max,',
+    'GPRINT:avg:LAST:%5.1lf%s Last\l',
+    "LINE1:trend#$FullMagenta:Trend since last week\\n:dashes=3",
     ],
     ps_state => ['-v', 'Processes',
     'DEF:avg={file}:value:AVERAGE',
@@ -2777,12 +2890,17 @@ sub meta_graph_generic_stack
 
   my $timespan_str = _get_param_timespan ();
   my $timespan_int = (-1) * $ValidTimespan->{$timespan_str};
+  my @end_time = ();
+  if ($timespan_str eq 'trend') {
+    @end_time = ('-e', '+' . (-$timespan_int));
+  }
 
   $opts->{'title'} ||= 'Unknown title';
   $opts->{'rrd_opts'} ||= [];
   $opts->{'colors'} ||= {};
+  $opts->{'exclude_from_trend'} ||= {};
 
-  my @cmd = ('-', '-a', 'PNG', '-s', $timespan_int,
+  my @cmd = ('-', '-a', 'PNG', '-s', $timespan_int, @end_time,
     '-t', $opts->{'title'} || 'Unknown title',
     @RRDDefaultArgs, @{$opts->{'rrd_opts'}});
 
@@ -2815,12 +2933,23 @@ sub meta_graph_generic_stack
       qq#DEF:${vname}_avg=$file:value:AVERAGE#,
       qq#DEF:${vname}_max=$file:value:MAX#,
       qq#CDEF:${vname}_nnl=${vname}_avg,UN,0,${vname}_avg,IF#);
+    if ($timespan_str eq 'trend' && !$opts->{'exclude_from_trend'}{$vname}) {
+      push (@cmd,
+        qq#DEF:${vname}_avg_for_trend=$file:value:AVERAGE:start=-1w#);
+    }
   }
 
   {
     my $vname = $vnames[@vnames - 1];
 
     push (@cmd, qq#CDEF:${vname}_stk=${vname}_nnl#);
+    if ($timespan_str eq 'trend') {
+      if (!$opts->{'exclude_from_trend'}{$vname}) {
+        push (@cmd, qq#CDEF:${vname}_stk_for_trend=${vname}_avg_for_trend#);
+      } else {
+        push (@cmd, qq#CDEF:${vname}_stk_for_trend=0#);
+      }
+    }
   }
   for (my $i = 1; $i < @$sources; $i++)
   {
@@ -2828,6 +2957,34 @@ sub meta_graph_generic_stack
     my $vname1 = $vnames[@vnames - $i];
 
     push (@cmd, qq#CDEF:${vname0}_stk=${vname0}_nnl,${vname1}_stk,+#);
+    if ($timespan_str eq 'trend') {
+      if (!$opts->{'exclude_from_trend'}{$vname0}) {
+        push (@cmd, qq#CDEF:${vname0}_stk_for_trend=${vname0}_avg_for_trend,${vname1}_stk_for_trend,+#);
+      } else {
+        push (@cmd, qq#CDEF:${vname0}_stk_for_trend=${vname1}_stk_for_trend#);
+      }
+    }
+  }
+
+  if ($timespan_str eq 'trend') {
+    my $vname = $vnames[0];
+    push (@cmd, qq(VDEF:${vname}_slope=${vname}_stk_for_trend,LSLSLOPE),
+       qq(VDEF:${vname}_intercept=${vname}_stk_for_trend,LSLINT),
+       qq(CDEF:${vname}_trend_raw=${vname}_stk_for_trend,POP,${vname}_slope,COUNT,*,${vname}_intercept,+));
+    my $lower_limit = $opts->{'trend_lower_limit'};
+    my $upper_limit = $opts->{'trend_upper_limit'};
+    if (defined ($upper_limit) && $upper_limit eq 'max') {
+      push (@cmd, qq(VDEF:max=${vname}_stk,MAXIMUM));
+    }
+    if (defined ($lower_limit) && defined ($upper_limit)) {
+      push (@cmd, qq(CDEF:${vname}_trend=${vname}_trend_raw,$lower_limit,$upper_limit,LIMIT));
+    } elsif (defined ($lower_limit)) {
+      push (@cmd, qq(CDEF:${vname}_trend=${vname}_trend_raw,$lower_limit,MAX));
+    } elsif (defined ($upper_limit)) {
+      push (@cmd, qq(CDEF:${vname}_trend=${vname}_trend_raw,$upper_limit,MIN));
+    } else {
+      push (@cmd, qq(CDEF:${vname}_trend=${vname}_trend_raw));
+    }
   }
 
   for (my $i = 0; $i < @$sources; $i++)
@@ -2863,6 +3020,12 @@ sub meta_graph_generic_stack
       qq(GPRINT:${vname}_max:MAX:$number_format Max,),
       qq(GPRINT:${vname}_avg:LAST:$number_format Last\\l),
     );
+  }
+
+  if ($timespan_str eq 'trend') {
+    my $vname = $vnames[0];
+    my $FullMagenta= 'A000FF';
+    push (@cmd, qq(LINE1:${vname}_trend#${FullMagenta}:Trend since last week:dashes=3));
   }
 
   RRDs::graph (@cmd);
@@ -2903,6 +3066,9 @@ sub meta_graph_cpu
     'interrupt' => 'a000a0',
     'steal'     => '000000'
   };
+  $opts->{'exclude_from_trend'} = { '0idle' => 1 };
+  $opts->{'trend_lower_limit'} = 0;
+  $opts->{'trend_upper_limit'} = 100;
 
   _custom_sort_arrayref ($type_instances,
     [qw(idle nice user wait system softirq interrupt steal)]);
@@ -3003,6 +3169,9 @@ sub meta_graph_memory
   $opts->{'number_format'} = '%5.1lf%s';
 
   $opts->{'rrd_opts'} = ['-b', '1024', '-v', 'Bytes'];
+  $opts->{'exclude_from_trend'} = { '0free' => 1, '1cached' => 1, '2buffered' => 1 };
+  $opts->{'trend_lower_limit'} = 0;
+  $opts->{'trend_upper_limit'} = 'max';
 
   my @files = ();
 
@@ -3259,6 +3428,10 @@ sub meta_graph_swap
   . (defined ($plugin_instance) ? "-$plugin_instance" : '') . "/$type";
   $opts->{'number_format'} = '%5.1lf%s';
   $opts->{'rrd_opts'} = ['-v', 'Bytes'];
+
+  $opts->{'exclude_from_trend'} = { '0Free' => 1 };
+  $opts->{'trend_lower_limit'} = 0;
+  $opts->{'trend_upper_limit'} = 'max';
 
   my @files = ();
 
