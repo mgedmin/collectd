@@ -955,6 +955,8 @@ sub load_graph_definitions
 
   my $HalfBlueGreen = '89B3C9';
 
+  my $Grey       = 'EEEEEE';
+
   $GraphDefs =
   {
     apache_bytes => ['DEF:min_raw={file}:count:MIN',
@@ -2078,7 +2080,8 @@ sub load_graph_definitions
     'GPRINT:max:MAX:%5.1lf%% Max,',
     'GPRINT:avg:LAST:%5.1lf%% Last\l'
     ],
-    ping => ['DEF:ping_avg={file}:ping:AVERAGE',
+    ping => ['-v', 'ms',
+    'DEF:ping_avg={file}:ping:AVERAGE',
     'DEF:ping_min={file}:ping:MIN',
     'DEF:ping_max={file}:ping:MAX',
     "AREA:ping_max#$HalfBlue",
@@ -2088,6 +2091,32 @@ sub load_graph_definitions
     'GPRINT:ping_avg:AVERAGE:%4.1lf ms Avg,',
     'GPRINT:ping_max:MAX:%4.1lf ms Max,',
     'GPRINT:ping_avg:LAST:%4.1lf ms Last'],
+    ping_stddev => ['-v', 'ms',
+    'DEF:ping_avg={file}:value:AVERAGE',
+    'DEF:ping_min={file}:value:MIN',
+    'DEF:ping_max={file}:value:MAX',
+    "AREA:ping_max#$HalfBlue",
+    "AREA:ping_min#$Canvas",
+    "LINE1:ping_avg#$FullBlue:Ping",
+    'GPRINT:ping_min:MIN:%4.1lf ms Min,',
+    'GPRINT:ping_avg:AVERAGE:%4.1lf ms Avg,',
+    'GPRINT:ping_max:MAX:%4.1lf ms Max,',
+    'GPRINT:ping_avg:LAST:%4.1lf ms Last'],
+    ping_droprate => ['-v', 'Percent',
+    'DEF:avg_value={file}:value:AVERAGE',
+    'DEF:min_value={file}:value:MIN',
+    'DEF:max_value={file}:value:MAX',
+    'CDEF:avg=avg_value,100,*',
+    'CDEF:min=min_value,100,*',
+    'CDEF:max=max_value,100,*',
+    "AREA:max#$HalfRed",
+    "AREA:min#$Canvas",
+    "LINE1:avg#$FullRed:Percent",
+    'GPRINT:min:MIN:%5.1lf%% Min,',
+    'GPRINT:avg:AVERAGE:%5.1lf%% Avg,',
+    'GPRINT:max:MAX:%5.1lf%% Max,',
+    'GPRINT:avg:LAST:%5.1lf%% Last\l'
+    ],
     pg_blks => ['DEF:pg_blks_avg={file}:value:AVERAGE',
     'DEF:pg_blks_min={file}:value:MIN',
     'DEF:pg_blks_max={file}:value:MAX',
@@ -2311,6 +2340,28 @@ sub load_graph_definitions
     'GPRINT:max:MAX:%5.1lf%s Max,',
     'GPRINT:avg:LAST:%5.1lf%s Last\l'
     ],
+    ps_stacksize => ['-v', 'Bytes',
+    'DEF:avg={file}:value:AVERAGE',
+    'DEF:min={file}:value:MIN',
+    'DEF:max={file}:value:MAX',
+    "AREA:avg#$HalfYellow",
+    "LINE1:avg#$FullYellow:Stack",
+    'GPRINT:min:MIN:%5.1lf%s Min,',
+    'GPRINT:avg:AVERAGE:%5.1lf%s Avg,',
+    'GPRINT:max:MAX:%5.1lf%s Max,',
+    'GPRINT:avg:LAST:%5.1lf%s Last\l'
+    ],
+    ps_vm => ['-v', 'Bytes',
+    'DEF:avg={file}:value:AVERAGE',
+    'DEF:min={file}:value:MIN',
+    'DEF:max={file}:value:MAX',
+    "AREA:avg#$HalfGreen",
+    "LINE1:avg#$FullGreen:VIRT",
+    'GPRINT:min:MIN:%5.1lf%s Min,',
+    'GPRINT:avg:AVERAGE:%5.1lf%s Avg,',
+    'GPRINT:max:MAX:%5.1lf%s Max,',
+    'GPRINT:avg:LAST:%5.1lf%s Last\l'
+    ],
     ps_state => ['-v', 'Processes',
     'DEF:avg={file}:value:AVERAGE',
     'DEF:min={file}:value:MIN',
@@ -2414,6 +2465,16 @@ sub load_graph_definitions
     'GPRINT:used_avg:AVERAGE:%5.1lf%s Avg,',
     'GPRINT:used_max:MAX:%5.1lf%s Max,',
     'GPRINT:used_avg:LAST:%5.1lf%s Last\l'
+    ],
+    swap_io => ['-v', 'Pages/s', # just guessing at the units!
+    'DEF:min={file}:value:MIN',
+    'DEF:avg={file}:value:AVERAGE',
+    'DEF:max={file}:value:MAX',
+    "AREA:avg#$HalfGreen",
+    "LINE1:avg#$FullGreen:Pages/s",
+    'GPRINT:avg:AVERAGE:%5.1lf%s Avg,',
+    'GPRINT:max:MAX:%5.1lf%s Max,',
+    'GPRINT:avg:LAST:%5.1lf%s Last',
     ],
     tcp_connections => ['-v', 'Connections',
     'DEF:avg={file}:value:AVERAGE',
@@ -2523,6 +2584,19 @@ sub load_graph_definitions
     'GPRINT:multimeter_avg:AVERAGE:%4.1lf Average,',
     'GPRINT:multimeter_max:MAX:%4.1lf Max,',
     'GPRINT:multimeter_avg:LAST:%4.1lf Last\l'
+    ],
+    uptime => ['-v', 'Days',
+    'DEF:avg={file}:value:AVERAGE',
+    'DEF:min={file}:value:MIN',
+    'DEF:max={file}:value:MAX',
+    'CDEF:avg_days=avg,86400,/',
+    'CDEF:max_days=max,86400,/',
+    'CDEF:min_days=min,86400,/',
+    "AREA:max_days#$HalfBlue",
+    "AREA:min_days#$Grey",
+    "LINE1:avg_days#$FullBlue:Uptime",
+    'GPRINT:max_days:MAX:%6.2lf Max,',
+    'GPRINT:avg_days:LAST:%6.2lf Last\l'
     ],
     users => ['-v', 'Users',
     'DEF:users_avg={file}:users:AVERAGE',
@@ -2674,6 +2748,8 @@ sub load_graph_definitions
   $GraphDefs->{'vmpage_io-memory'} = $GraphDefs->{'vmpage_io'};
   $GraphDefs->{'vmpage_io-swap'} = $GraphDefs->{'vmpage_io'};
   $GraphDefs->{'virt_cpu_total'} = $GraphDefs->{'virt_cpu_total'};
+  $GraphDefs->{'delay'} = $GraphDefs->{'time_offset'};
+  $GraphDefs->{'time_dispersion'} = $GraphDefs->{'time_offset'};
 
   $MetaGraphDefs->{'cpu'} = \&meta_graph_cpu;
   $MetaGraphDefs->{'dns_qtype'} = \&meta_graph_dns;
